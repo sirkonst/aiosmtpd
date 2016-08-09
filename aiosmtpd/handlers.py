@@ -6,7 +6,7 @@ Pass in an instance of one of these classes, or derive your own, to provide
 your own handling of messages.  Implement only the methods you care about.
 """
 
-
+import asyncio
 import sys
 import logging
 import mailbox
@@ -151,6 +151,29 @@ class Message:
         self.handle_message(message)
 
     def handle_message(self, message):
+        raise NotImplementedError                   # pragma: no cover
+
+
+@public
+class AsyncMessage(Message):
+
+    @asyncio.coroutine
+    def process_message(self, peer, mailfrom, rcpttos, data, *, loop, **kws):
+        # If the server was created with decode_data True, then data will be a
+        # str, otherwise it will be bytes.
+        if isinstance(data, bytes):
+            message = message_from_bytes(data, self.message_class)
+        else:
+            assert isinstance(data, str), (
+              'Expected str or bytes, got {}'.format(type(data)))
+            message = message_from_string(data, self.message_class)
+        message['X-Peer'] = str(peer)
+        message['X-MailFrom'] = mailfrom
+        message['X-RcptTos'] = COMMASPACE.join(rcpttos)
+        yield from self.handle_message(message, loop=loop)
+
+    @asyncio.coroutine
+    def handle_message(self, message, *, loop):
         raise NotImplementedError                   # pragma: no cover
 
 
