@@ -152,7 +152,14 @@ class SMTP(asyncio.StreamReaderProtocol):
                 yield from self.push(
                     '500 Error: command "%s" not recognized' % command)
                 continue
-            yield from method(arg)
+
+            try:
+                yield from method(arg)
+            except Exception as e:
+                log.exception(
+                    'Exception in method %s:', method.__name__, exc_info=e)
+                yield from self.push(
+                    '421 Service not available, closing transmission channel')
 
     # SMTP and ESMTP commands
     @asyncio.coroutine
