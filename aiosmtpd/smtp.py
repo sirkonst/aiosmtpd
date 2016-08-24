@@ -28,6 +28,7 @@ class SMTP(asyncio.StreamReaderProtocol):
     command_size_limit = 512
     command_size_limits = collections.defaultdict(
         lambda x=command_size_limit: x)
+    _instances = set()
 
     def __init__(self, handler,
                  *,
@@ -69,6 +70,7 @@ class SMTP(asyncio.StreamReaderProtocol):
             self.hostname = socket.getfqdn()   # XXX this blocks, fix it?
         else:
             self.hostname = hostname
+        self._instances.add(self)
 
     @property
     def max_command_size_limit(self):
@@ -279,11 +281,11 @@ class SMTP(asyncio.StreamReaderProtocol):
             else:
                 yield from self.push(
                     '501 Supported commands: EHLO HELO MAIL RCPT '
-                    'DATA RSET NOOP QUIT VRFY')
+                    'DATA RSET NOOP QUIT VRFY AUTH')
         else:
             yield from self.push(
                 '250 Supported commands: EHLO HELO MAIL RCPT DATA '
-                'RSET NOOP QUIT VRFY')
+                'RSET NOOP QUIT VRFY AUTH')
 
     @asyncio.coroutine
     def smtp_VRFY(self, arg):
@@ -465,3 +467,17 @@ class SMTP(asyncio.StreamReaderProtocol):
     @asyncio.coroutine
     def smtp_EXPN(self, arg):
         yield from self.push('502 EXPN not implemented')
+
+    def __del__(self):
+        self._instances.remove(self)
+
+    @classmethod
+    async def wait_clients_disconnected(cls, *, loop=None):
+        loop = loop or asyncio.get_event_loop()
+        fs = []
+        for inst in cls._instances:
+            if inst._handler_coroutine:
+                fs.append(inst._handler_coroutine)
+        if fs:
+            await asyncio.wait(fs, loop=loop)
+        cls._instances = set()
