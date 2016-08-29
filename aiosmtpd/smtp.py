@@ -469,7 +469,7 @@ class SMTP(asyncio.StreamReaderProtocol):
         yield from self.push('502 EXPN not implemented')
 
     def __del__(self):
-        self._instances.remove(self)
+        self._instances.discard(self)
 
     @classmethod
     async def wait_clients_disconnected(cls, *, loop=None):
