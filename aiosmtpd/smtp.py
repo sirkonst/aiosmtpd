@@ -213,6 +213,7 @@ class SMTP(asyncio.StreamReaderProtocol):
         else:
             yield from self.push('221 Bye')
             self._handler_coroutine.cancel()
+            self.transport.close()
 
     @asyncio.coroutine
     def close(self):
