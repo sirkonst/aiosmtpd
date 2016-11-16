@@ -9,7 +9,7 @@ from enum import Enum
 from public import public
 
 
-__version__ = '1.1'
+__version__ = '1.2'
 __ident__ = 'Python SMTP {}'.format(__version__)
 log = logging.getLogger('mail.log')
 
@@ -28,7 +28,7 @@ class SMTP(asyncio.StreamReaderProtocol):
     command_size_limit = 512
     command_size_limits = collections.defaultdict(
         lambda x=command_size_limit: x)
-    _instances = set()
+    _handlers = set()
 
     def __init__(self, handler,
                  *,
@@ -70,7 +70,6 @@ class SMTP(asyncio.StreamReaderProtocol):
             self.hostname = socket.getfqdn()   # XXX this blocks, fix it?
         else:
             self.hostname = hostname
-        self._instances.add(self)
 
     @property
     def max_command_size_limit(self):
@@ -87,6 +86,7 @@ class SMTP(asyncio.StreamReaderProtocol):
         # Process the client's requests.
         self.connection_closed = False
         self._handler_coroutine = self.loop.create_task(self._handle_client())
+        self._handlers.add(self._handler_coroutine)
 
     def _client_connected_cb(self, reader, writer):
         # This is redundant since we subclass StreamReaderProtocol, but I like
@@ -99,6 +99,7 @@ class SMTP(asyncio.StreamReaderProtocol):
 
     def connection_lost(self, exc):
         self._handler_coroutine.cancel()
+        self._handlers.discard(self._handler_coroutine)
         super().connection_lost(exc)
 
     def _set_post_data_state(self):
@@ -476,16 +477,8 @@ class SMTP(asyncio.StreamReaderProtocol):
     def smtp_EXPN(self, arg):
         yield from self.push('502 EXPN not implemented')
 
-    def __del__(self):
-        self._instances.discard(self)
-
     @classmethod
     async def wait_clients_disconnected(cls, *, loop=None):
         loop = loop or asyncio.get_event_loop()
-        fs = []
-        for inst in cls._instances:
-            if inst._handler_coroutine:
-                fs.append(inst._handler_coroutine)
-        if fs:
-            await asyncio.wait(fs, loop=loop)
-        cls._instances = set()
+        if cls._handlers:
+            await asyncio.wait(cls._handlers, loop=loop)
