@@ -165,6 +165,8 @@ class SMTP(asyncio.StreamReaderProtocol):
                 yield from self.push(
                     '421 Service not available, closing transmission channel')
 
+            yield  # give a change to switch to another coroutine
+
     # SMTP and ESMTP commands
     @asyncio.coroutine
     def smtp_HELO(self, hostname):
@@ -223,7 +225,7 @@ class SMTP(asyncio.StreamReaderProtocol):
         # XXX this close is probably not quite right.
         if self._writer:
             self._writer.close()
-        self._connection_closed = True
+        self.connection_closed = True
 
     def _strip_command_keyword(self, keyword, arg):
         keylen = len(keyword)
@@ -439,6 +441,8 @@ class SMTP(asyncio.StreamReaderProtocol):
                 data.append(line.decode('utf-8'))
             else:
                 data.append(line)
+
+            yield  # give a change to switch to another coroutine
         # Remove extraneous carriage returns and de-transparency
         # according to RFC 5321, Section 4.5.2.
         for i in range(len(data)):
