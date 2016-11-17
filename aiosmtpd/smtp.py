@@ -9,7 +9,7 @@ from enum import Enum
 from public import public
 
 
-__version__ = '1.2'
+__version__ = '1.3'
 __ident__ = 'Python SMTP {}'.format(__version__)
 log = logging.getLogger('mail.log')
 
@@ -158,13 +158,7 @@ class SMTP(asyncio.StreamReaderProtocol):
                     '500 Error: command "%s" not recognized' % command)
                 continue
 
-            try:
-                yield from method(arg)
-            except Exception as e:
-                log.exception(
-                    'Exception in method %s:', method.__name__, exc_info=e)
-                yield from self.push(
-                    '421 Service not available, closing transmission channel')
+            yield from method(arg)
 
             yield  # give a change to switch to another coroutine
 
