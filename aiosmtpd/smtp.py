@@ -122,37 +122,59 @@ class SMTP(asyncio.StreamReaderProtocol):
     def _handle_client(self):
         log.info('handling connection')
         yield from self.push('220 %s %s' % (self.fqdn, __version__))
-        while not self.connection_closed:
-            # XXX Put the line limit stuff into the StreamReader?
-            line = yield from self._reader.readline()
-            # XXX this rstrip may not completely preserve old behavior.
-            line = line.decode('utf-8').rstrip('\r\n')
-            log.info('Data: %r', line)
-            if self.smtp_state is not State.command:
-                yield from self.push('451 Internal confusion')
-                continue
-            if not line:
-                yield from self.push('500 Error: bad syntax')
-                continue
-            i = line.find(' ')
-            if i < 0:
-                command = line.upper()
-                arg = None
-            else:
-                command = line[:i].upper()
-                arg = line[i+1:].strip()
-            max_sz = (self.command_size_limits[command]
-                      if self.extended_smtp
-                      else self.command_size_limit)
-            if len(line) > max_sz:
-                yield from self.push('500 Error: line too long')
-                continue
-            method = getattr(self, 'smtp_' + command, None)
-            if not method:
-                yield from self.push(
-                    '500 Error: command "%s" not recognized' % command)
-                continue
-            yield from method(arg)
+        try:
+            while not self.connection_closed:
+                # XXX Put the line limit stuff into the StreamReader?
+                line = yield from self._reader.readline()
+                # XXX this rstrip may not completely preserve old behavior.
+                line = line.decode('utf-8').rstrip('\r\n')
+                log.info('Data: %r', line)
+                if self.smtp_state is not State.command:
+                    yield from self.push('451 Internal confusion')
+                    continue
+                if not line:
+                    yield from self.push('500 Error: bad syntax')
+                    continue
+                i = line.find(' ')
+                if i < 0:
+                    command = line.upper()
+                    arg = None
+                else:
+                    command = line[:i].upper()
+                    arg = line[i+1:].strip()
+                max_sz = (self.command_size_limits[command]
+                          if self.extended_smtp
+                          else self.command_size_limit)
+                if len(line) > max_sz:
+                    yield from self.push('500 Error: line too long')
+                    continue
+                method = getattr(self, 'smtp_' + command, None)
+                if not method:
+                    yield from self.push(
+                        '500 Error: command "%s" not recognized' % command)
+                    continue
+                yield from method(arg)
+        except asyncio.CancelledError:
+            # The connection got reset during the DATA command.
+            # XXX If handler method raises ConnectionResetError, we should
+            # verify that it was actually self._reader that was reset.
+            log.info('Connection lost during _handle_client()')
+            self._writer.close()
+            raise
+        except Exception as error:
+            try:
+                status = yield from self.handle_exception(error)
+                yield from self.push(status)
+            except Exception as error:
+                try:
+                    log.exception('Exception in handle_exception()')
+                    status = '500 Error: ({}) {}'.format(
+                        error.__class__.__name__, str(error))
+                except Exception:
+                    status = '500 Error: Cannot describe error'
+                yield from self.push(status)
+            self._writer.close()
+
 
     # SMTP and ESMTP commands
     @asyncio.coroutine
@@ -398,6 +420,17 @@ class SMTP(asyncio.StreamReaderProtocol):
             return
         self._set_rset_state()
         yield from self.push('250 OK')
+
+    @asyncio.coroutine
+    def handle_exception(self, error):
+        if hasattr(self.event_handler, 'handle_exception'):
+            status = yield from self.event_handler.handle_exception(error)
+            return status
+        else:
+            log.exception('SMTP session exception')
+            status = '500 Error: ({}) {}'.format(
+                error.__class__.__name__, str(error))
+            return status
 
     @asyncio.coroutine
     def smtp_DATA(self, arg):
